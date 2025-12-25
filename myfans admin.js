@@ -26,15 +26,28 @@ function isValidYouTubeUrl(url) {
 }
 
 // Get video info using YouTube oEmbed API (works for unlisted videos)
-async function getVideoInfoViaOEmbed(videoId) {
+async function getVideoInfoViaOEmbed(videoId, originalUrl) {
     try {
-        const response = await fetch(`https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`);
+        // Always use a clean URL with just the video ID for oEmbed API
+        // The oEmbed API doesn't need query parameters and they can cause issues
+        // We preserve the original URL for storage, but use a clean URL for validation
+        const cleanYouTubeUrl = `https://www.youtube.com/watch?v=${videoId}`;
+        
+        // Properly encode the URL for the oEmbed API call
+        const encodedUrl = encodeURIComponent(cleanYouTubeUrl);
+        const oembedUrl = `https://www.youtube.com/oembed?url=${encodedUrl}&format=json`;
+        
+        const response = await fetch(oembedUrl);
         
         if (!response.ok) {
             if (response.status === 401 || response.status === 403) {
                 throw new Error('Video is private or restricted');
             }
-            throw new Error('Failed to fetch video information');
+            if (response.status === 404) {
+                throw new Error('Video not found');
+            }
+            // For other errors, provide a generic message with status
+            throw new Error(`Failed to fetch video information (${response.status} ${response.statusText})`);
         }
         
         const data = await response.json();
@@ -45,6 +58,7 @@ async function getVideoInfoViaOEmbed(videoId) {
             success: true
         };
     } catch (error) {
+        // Re-throw network errors or API errors
         throw error;
     }
 }
@@ -311,6 +325,12 @@ document.addEventListener('DOMContentLoaded', function() {
         
         const videoId = extractVideoId(url);
         
+        // Double-check video ID was extracted
+        if (!videoId) {
+            showError('Please enter a valid YouTube URL.');
+            return;
+        }
+        
         // Disable button and show loading
         addButton.disabled = true;
         btnText.style.display = 'none';
@@ -332,7 +352,9 @@ document.addEventListener('DOMContentLoaded', function() {
             }
             
             // Get video info via oEmbed (this validates accessibility)
-            const videoInfo = await getVideoInfoViaOEmbed(videoId);
+            // We use a clean URL with just the video ID for oEmbed API
+            // The original URL is preserved for storage
+            const videoInfo = await getVideoInfoViaOEmbed(videoId, url);
             
             // If we got here, the video is accessible
             // Display preview
