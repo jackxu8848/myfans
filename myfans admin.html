@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MyFans - YouTube Video Manager</title>
+    <link rel="stylesheet" href="myfans admin.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="header-content">
+                <div>
+                    <h1>MyFans</h1>
+                    <p class="subtitle">Manage your YouTube videos</p>
+                </div>
+                <div class="header-controls">
+                    <div class="mode-toggle">
+                        <span class="mode-label">Viewer</span>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="modeToggle" checked>
+                            <span class="toggle-slider"></span>
+                        </label>
+                        <span class="mode-label">Creator</span>
+                    </div>
+                    <button id="logoutBtn" class="btn-logout">Logout</button>
+                </div>
+            </div>
+        </header>
+
+        <main>
+            <section class="add-video-section">
+                <h2>Add YouTube Video</h2>
+                <div class="video-form-container">
+                    <form id="videoForm" class="video-form">
+                        <div class="form-group">
+                            <label for="youtubeUrl">YouTube URL</label>
+                            <input 
+                                type="text" 
+                                id="youtubeUrl" 
+                                name="youtubeUrl" 
+                                placeholder="https://www.youtube.com/watch?v=..." 
+                                required
+                            >
+                            <small class="form-help">You can add any accessible YouTube video (public or unlisted). Private videos cannot be added.</small>
+                        </div>
+                        <div class="form-group">
+                            <label for="videoPrice">Price</label>
+                            <div class="price-input-container">
+                                <input 
+                                    type="number" 
+                                    id="videoPrice" 
+                                    name="videoPrice" 
+                                    placeholder="0.00" 
+                                    step="0.01"
+                                    min="0"
+                                    value="0"
+                                    required
+                                >
+                                <span class="currency-symbol">$</span>
+                            </div>
+                            <small class="form-help">Enter the price for this video. Enter 0 or leave as 0 for free videos.</small>
+                        </div>
+                        <button type="submit" class="btn btn-primary" id="addButton">
+                            <span class="btn-text">Add Video</span>
+                            <span class="btn-loader" style="display: none;">Processing...</span>
+                        </button>
+                    </form>
+                    <div id="errorMessage" class="error-message" style="display: none;"></div>
+                    <div id="successMessage" class="success-message" style="display: none;"></div>
+                </div>
+            </section>
+
+            <section class="video-preview-section" id="videoPreview" style="display: none;">
+                <h2>Video Preview</h2>
+                <div class="video-preview-card">
+                    <a id="videoThumbnailLink" href="#" target="_blank" rel="noopener noreferrer" class="video-preview-thumbnail-link">
+                        <img id="videoThumbnail" src="" alt="Video thumbnail" class="video-thumbnail">
+                    </a>
+                    <div class="video-info">
+                        <a id="videoTitleLink" href="#" target="_blank" rel="noopener noreferrer" class="video-preview-title-link">
+                            <h3 id="videoTitle"></h3>
+                        </a>
+                        <div class="video-meta">
+                            <span id="videoId" class="video-id"></span>
+                            <span id="videoStatus" class="video-status"></span>
+                            <span id="videoPriceDisplay" class="video-price-display"></span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="videos-list-section">
+                <h2>Your Videos</h2>
+                <div id="videosList" class="videos-grid">
+                    <p class="empty-message">No videos added yet. Add your first video above!</p>
+                </div>
+            </section>
+
+            <section class="pricing-settings-section">
+                <h2>Pricing Configuration</h2>
+                <div class="pricing-settings-container">
+                    <div class="pricing-info-card">
+                        <h3>📦 Individual Pricing</h3>
+                        <p>Each video has its own price set when adding it. You can see individual prices on each video card above.</p>
+                    </div>
+
+                    <div class="pricing-option-card">
+                        <h3>🎁 Bundle Pricing</h3>
+                        <p class="pricing-description">Create bundle deals where users can select X videos for a special price.</p>
+                        <form id="bundleForm" class="pricing-form">
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="bundleCount">Number of Videos</label>
+                                    <input 
+                                        type="number" 
+                                        id="bundleCount" 
+                                        name="bundleCount" 
+                                        min="2"
+                                        placeholder="e.g. 5"
+                                        required
+                                    >
+                                </div>
+                                <div class="form-group">
+                                    <label for="bundlePrice">Bundle Price</label>
+                                    <div class="price-input-container">
+                                        <input 
+                                            type="number" 
+                                            id="bundlePrice" 
+                                            name="bundlePrice" 
+                                            step="0.01"
+                                            min="0.01"
+                                            placeholder="0.00"
+                                            required
+                                        >
+                                        <span class="currency-symbol">$</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <button type="submit" class="btn btn-primary">Add Bundle</button>
+                        </form>
+                        <div id="bundlesList" class="bundles-list"></div>
+                    </div>
+
+                    <div class="pricing-option-card">
+                        <h3>👑 Membership Pricing</h3>
+                        <p class="pricing-description">Set up a monthly subscription for unlimited access to all videos.</p>
+                        <form id="membershipForm" class="pricing-form">
+                            <div class="form-group">
+                                <label for="membershipPrice">Monthly Price</label>
+                                <div class="price-input-container">
+                                    <input 
+                                        type="number" 
+                                        id="membershipPrice" 
+                                        name="membershipPrice" 
+                                        step="0.01"
+                                        min="0.01"
+                                        placeholder="0.00"
+                                        required
+                                    >
+                                    <span class="currency-symbol">$</span>
+                                </div>
+                                <small class="form-help">Users will be charged this amount monthly for access to all videos.</small>
+                            </div>
+                            <button type="submit" class="btn btn-primary">Save Membership Price</button>
+                        </form>
+                        <div id="membershipDisplay" class="membership-display"></div>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+
+    <script src="myfans admin.js"></script>
+</body>
+</html>
+

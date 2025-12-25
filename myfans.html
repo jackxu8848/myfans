@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MyFans - Watch Videos</title>
+    <link rel="stylesheet" href="myfans.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="header-content">
+                <div>
+                    <h1>MyFans</h1>
+                    <p class="subtitle">Watch Exclusive Videos</p>
+                </div>
+                <div class="header-controls">
+                    <div class="mode-toggle">
+                        <span class="mode-label">Viewer</span>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="modeToggle">
+                            <span class="toggle-slider"></span>
+                        </label>
+                        <span class="mode-label">Creator</span>
+                    </div>
+                    <div class="profile-dropdown">
+                        <div class="profile-avatar" id="profileAvatar">
+                            <span id="profileInitials"></span>
+                        </div>
+                        <div class="profile-menu" id="profileMenu" style="display: none;">
+                            <div class="profile-info">
+                                <p class="profile-name" id="profileName"></p>
+                                <p class="profile-email" id="profileEmail"></p>
+                            </div>
+                            <div class="profile-divider"></div>
+                            <button id="profileLogout" class="profile-menu-item">Logout</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <main>
+            <section class="videos-section">
+                <h2>Available Videos</h2>
+                <div id="videosList" class="videos-grid">
+                    <p class="empty-message">Loading videos...</p>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Pricing Options Modal -->
+    <div id="pricingOptionsModal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Choose Payment Option</h2>
+                <span class="modal-close" id="closePricingOptions">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="video-preview-info">
+                    <img id="pricingModalThumbnail" src="" alt="Video thumbnail" class="modal-thumbnail">
+                    <div class="video-details">
+                        <h3 id="pricingModalTitle"></h3>
+                        <p class="price-info">Price: <span id="pricingModalPrice" class="price-amount"></span></p>
+                    </div>
+                </div>
+                <div class="pricing-options-list">
+                    <div class="pricing-option-card" id="individualOption">
+                        <div class="pricing-option-header">
+                            <h3>Buy Individual Video</h3>
+                            <span class="pricing-option-price" id="individualPrice"></span>
+                        </div>
+                        <p class="pricing-option-description">Purchase this single video for one-time access.</p>
+                        <button class="btn btn-primary" id="selectIndividual">Select</button>
+                    </div>
+                    
+                    <div class="pricing-option-card" id="bundleOption" style="display: none;">
+                        <div class="pricing-option-header">
+                            <h3>Buy Bundle Package</h3>
+                            <span class="pricing-option-price" id="bundlePriceDisplay"></span>
+                        </div>
+                        <p class="pricing-option-description" id="bundleDescription"></p>
+                        <button class="btn btn-primary" id="selectBundle">Select</button>
+                    </div>
+                    
+                    <div class="pricing-option-card" id="membershipOption" style="display: none;">
+                        <div class="pricing-option-header">
+                            <h3>Subscribe to Membership</h3>
+                            <span class="pricing-option-price" id="membershipPriceDisplay"></span>
+                        </div>
+                        <p class="pricing-option-description">Get unlimited access to all videos with monthly subscription.</p>
+                        <button class="btn btn-primary" id="selectMembership">Select</button>
+                    </div>
+                </div>
+                <button id="cancelPricingOptions" class="btn btn-secondary">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Payment Popup Modal -->
+    <div id="paymentModal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="paymentModalTitle">Payment Required</h2>
+                <span class="modal-close" id="closeModal">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="video-preview-info">
+                    <img id="modalThumbnail" src="" alt="Video thumbnail" class="modal-thumbnail">
+                    <div class="video-details">
+                        <h3 id="modalTitle"></h3>
+                        <p class="price-info">Price: <span id="modalPrice" class="price-amount"></span></p>
+                    </div>
+                </div>
+                <div id="singleVideoPayment" class="payment-form">
+                    <p class="payment-message">To watch this video, please complete the payment.</p>
+                    <div class="payment-options">
+                        <label class="payment-option">
+                            <input type="radio" name="paymentMethod" value="card" checked>
+                            <span>Credit/Debit Card</span>
+                        </label>
+                        <label class="payment-option">
+                            <input type="radio" name="paymentMethod" value="paypal">
+                            <span>PayPal</span>
+                        </label>
+                        <label class="payment-option">
+                            <input type="radio" name="paymentMethod" value="crypto">
+                            <span>Cryptocurrency</span>
+                        </label>
+                    </div>
+                    <button id="proceedPayment" class="btn btn-primary btn-large">Proceed to Payment</button>
+                    <button id="cancelPayment" class="btn btn-secondary">Cancel</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bundle Selection Modal -->
+    <div id="bundleModal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Select Videos for Bundle</h2>
+                <span class="modal-close" id="closeBundleModal">&times;</span>
+            </div>
+            <div class="modal-body">
+                <p class="payment-message">Select <strong id="bundleCountRequired">0</strong> videos for <strong id="bundlePriceDisplay">$0.00</strong></p>
+                <div id="bundleVideosList" class="bundle-videos-list"></div>
+                <div class="bundle-summary">
+                    <p>Selected: <span id="selectedCount">0</span> / <span id="requiredCount">0</span> videos</p>
+                    <button id="purchaseBundle" class="btn btn-primary btn-large" disabled>Purchase Bundle</button>
+                    <button id="cancelBundle" class="btn btn-secondary">Cancel</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Membership Payment Modal -->
+    <div id="membershipModal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Membership Required</h2>
+                <span class="modal-close" id="closeMembershipModal">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="membership-info">
+                    <h3>Subscribe to Membership</h3>
+                    <p class="membership-price">Monthly Price: <span id="membershipPriceDisplay" class="price-amount"></span></p>
+                    <p class="membership-benefits">Get unlimited access to all videos with a monthly subscription.</p>
+                </div>
+                <div class="payment-form">
+                    <div class="payment-options">
+                        <label class="payment-option">
+                            <input type="radio" name="membershipPaymentMethod" value="card" checked>
+                            <span>Credit/Debit Card</span>
+                        </label>
+                        <label class="payment-option">
+                            <input type="radio" name="membershipPaymentMethod" value="paypal">
+                            <span>PayPal</span>
+                        </label>
+                        <label class="payment-option">
+                            <input type="radio" name="membershipPaymentMethod" value="crypto">
+                            <span>Cryptocurrency</span>
+                        </label>
+                    </div>
+                    <button id="proceedMembershipPayment" class="btn btn-primary btn-large">Subscribe Now</button>
+                    <button id="cancelMembership" class="btn btn-secondary">Cancel</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="myfans.js"></script>
+</body>
+</html>
