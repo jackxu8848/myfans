@@ -1,94 +1,101 @@
-// Simple authentication system using localStorage
-// In production, this would connect to a backend API
+// Updated login.js using API instead of localStorage
+// This version stores data in the database via the backend API
+
+const API_BASE_URL = 'http://localhost:3000/api';
+
+// Helper function to get auth token
+function getAuthToken() {
+    return localStorage.getItem('myfans_auth_token');
+}
+
+// Helper function to save auth token
+function saveAuthToken(token) {
+    localStorage.setItem('myfans_auth_token', token);
+}
+
+// Helper function to remove auth token
+function removeAuthToken() {
+    localStorage.removeItem('myfans_auth_token');
+}
+
+// Helper function to make API requests
+async function apiRequest(endpoint, options = {}) {
+    const token = getAuthToken();
+    const headers = {
+        'Content-Type': 'application/json',
+        ...(token && { Authorization: `Bearer ${token}` }),
+        ...options.headers,
+    };
+
+    const config = {
+        ...options,
+        headers,
+    };
+
+    try {
+        const response = await fetch(`${API_BASE_URL}${endpoint}`, config);
+        const data = await response.json();
+
+        if (!response.ok) {
+            throw new Error(data.error || 'API request failed');
+        }
+
+        return data;
+    } catch (error) {
+        console.error('API Error:', error);
+        throw error;
+    }
+}
 
 // Check if user is already logged in
 function checkAuth() {
-    const currentUser = localStorage.getItem('myfans_current_user');
-    if (currentUser) {
-        window.location.href = 'myfans.html';
+    const token = getAuthToken();
+    if (token) {
+        window.location.href = 'index.html';
     }
 }
 
-// Register new user
-function registerUser(name, email, password) {
-    const users = getUsers();
+// Register new user via API
+async function registerUser(name, email, password) {
+    const response = await apiRequest('/auth/register', {
+        method: 'POST',
+        body: JSON.stringify({ name, email, password }),
+    });
     
-    // Check if email already exists
-    if (users.find(u => u.email === email)) {
-        throw new Error('Email already registered. Please login instead.');
+    if (response.token) {
+        saveAuthToken(response.token);
+        // Also store user info for compatibility
+        localStorage.setItem('myfans_current_user', JSON.stringify(response.user));
     }
     
-    // Create new user
-    const newUser = {
-        id: Date.now().toString(),
-        name: name,
-        email: email,
-        password: password, // In production, this should be hashed
-        createdAt: new Date().toISOString()
-    };
-    
-    users.push(newUser);
-    localStorage.setItem('myfans_users', JSON.stringify(users));
-    
-    return newUser;
+    return response.user;
 }
 
-// Login user
-function loginUser(email, password) {
-    const users = getUsers();
-    const user = users.find(u => u.email === email && u.password === password);
+// Login user via API
+async function loginUser(email, password) {
+    const response = await apiRequest('/auth/login', {
+        method: 'POST',
+        body: JSON.stringify({ email, password }),
+    });
     
-    if (!user) {
-        throw new Error('Invalid email or password.');
+    if (response.token) {
+        saveAuthToken(response.token);
+        // Also store user info for compatibility
+        localStorage.setItem('myfans_current_user', JSON.stringify(response.user));
     }
     
-    // Set current user
-    localStorage.setItem('myfans_current_user', JSON.stringify({
-        id: user.id,
-        name: user.name,
-        email: user.email
-    }));
-    
-    return user;
+    return response.user;
 }
 
-// Google login (simulated)
+// Google login (simulated - same as before)
 function googleLogin() {
     // In production, this would use Google OAuth
     // For demo purposes, we'll create a user with Google email
     const googleEmail = `user${Date.now()}@gmail.com`;
     const googleName = 'Google User';
     
-    const users = getUsers();
-    let user = users.find(u => u.email === googleEmail);
-    
-    if (!user) {
-        // Create new user
-        user = {
-            id: Date.now().toString(),
-            name: googleName,
-            email: googleEmail,
-            password: null, // Google users don't need password
-            createdAt: new Date().toISOString()
-        };
-        users.push(user);
-        localStorage.setItem('myfans_users', JSON.stringify(users));
-    }
-    
-    // Set current user
-    localStorage.setItem('myfans_current_user', JSON.stringify({
-        id: user.id,
-        name: user.name,
-        email: user.email
-    }));
-    
-    return user;
-}
-
-// Get all users
-function getUsers() {
-    const stored = localStorage.getItem('myfans_users');
-    return stored ? JSON.parse(stored) : [];
+    // Register as a new user via API
+    return registerUser(googleName, googleEmail, null);
 }
 
 // Show error message
@@ -150,7 +157,7 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Login form submission
     const loginFormElement = document.getElementById('loginFormElement');
-    loginFormElement.addEventListener('submit', function(e) {
+    loginFormElement.addEventListener('submit', async function(e) {
         e.preventDefault();
         hideMessages();
         
@@ -158,10 +165,10 @@ document.addEventListener('DOMContentLoaded', function() {
         const password = document.getElementById('loginPassword').value;
         
         try {
-            loginUser(email, password);
+            await loginUser(email, password);
             showSuccess('Login successful! Redirecting...');
             setTimeout(() => {
-                window.location.href = 'myfans.html';
+                window.location.href = 'index.html';
             }, 1000);
         } catch (error) {
             showError(error.message);
@@ -170,7 +177,7 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Register form submission
     const registerFormElement = document.getElementById('registerFormElement');
-    registerFormElement.addEventListener('submit', function(e) {
+    registerFormElement.addEventListener('submit', async function(e) {
         e.preventDefault();
         hideMessages();
         
@@ -190,10 +197,10 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         
         try {
-            registerUser(name, email, password);
+            await registerUser(name, email, password);
             showSuccess('Registration successful! Logging you in...');
             setTimeout(() => {
-                window.location.href = 'myfans.html';
+                window.location.href = 'index.html';
             }, 1000);
         } catch (error) {
             showError(error.message);
@@ -204,26 +211,26 @@ document.addEventListener('DOMContentLoaded', function() {
     const googleLoginBtn = document.getElementById('googleLoginBtn');
     const googleRegisterBtn = document.getElementById('googleRegisterBtn');
     
-    googleLoginBtn.addEventListener('click', function() {
+    googleLoginBtn.addEventListener('click', async function() {
         hideMessages();
         try {
-            googleLogin();
+            await googleLogin();
             showSuccess('Google login successful! Redirecting...');
             setTimeout(() => {
-                window.location.href = 'myfans.html';
+                window.location.href = 'index.html';
             }, 1000);
         } catch (error) {
             showError('Google login failed. Please try again.');
         }
     });
     
-    googleRegisterBtn.addEventListener('click', function() {
+    googleRegisterBtn.addEventListener('click', async function() {
         hideMessages();
         try {
-            googleLogin();
+            await googleLogin();
             showSuccess('Google registration successful! Redirecting...');
             setTimeout(() => {
-                window.location.href = 'myfans.html';
+                window.location.href = 'index.html';
             }, 1000);
         } catch (error) {
             showError('Google registration failed. Please try again.');
