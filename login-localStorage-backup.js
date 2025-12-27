@@ -1,101 +1,94 @@
-// Updated login.js using API instead of localStorage
-// This version stores data in the database via the backend API
-
-const API_BASE_URL = 'http://localhost:3000/api';
-
-// Helper function to get auth token
-function getAuthToken() {
-    return localStorage.getItem('myfans_auth_token');
-}
-
-// Helper function to save auth token
-function saveAuthToken(token) {
-    localStorage.setItem('myfans_auth_token', token);
-}
-
-// Helper function to remove auth token
-function removeAuthToken() {
-    localStorage.removeItem('myfans_auth_token');
-}
-
-// Helper function to make API requests
-async function apiRequest(endpoint, options = {}) {
-    const token = getAuthToken();
-    const headers = {
-        'Content-Type': 'application/json',
-        ...(token && { Authorization: `Bearer ${token}` }),
-        ...options.headers,
-    };
-
-    const config = {
-        ...options,
-        headers,
-    };
-
-    try {
-        const response = await fetch(`${API_BASE_URL}${endpoint}`, config);
-        const data = await response.json();
-
-        if (!response.ok) {
-            throw new Error(data.error || 'API request failed');
-        }
-
-        return data;
-    } catch (error) {
-        console.error('API Error:', error);
-        throw error;
-    }
-}
+// Simple authentication system using localStorage
+// In production, this would connect to a backend API
 
 // Check if user is already logged in
 function checkAuth() {
-    const token = getAuthToken();
-    if (token) {
+    const currentUser = localStorage.getItem('myfans_current_user');
+    if (currentUser) {
         window.location.href = 'index.html';
     }
 }
 
-// Register new user via API
-async function registerUser(name, email, password) {
-    const response = await apiRequest('/auth/register', {
-        method: 'POST',
-        body: JSON.stringify({ name, email, password }),
-    });
+// Register new user
+function registerUser(name, email, password) {
+    const users = getUsers();
     
-    if (response.token) {
-        saveAuthToken(response.token);
-        // Also store user info for compatibility
-        localStorage.setItem('myfans_current_user', JSON.stringify(response.user));
+    // Check if email already exists
+    if (users.find(u => u.email === email)) {
+        throw new Error('Email already registered. Please login instead.');
     }
     
-    return response.user;
+    // Create new user
+    const newUser = {
+        id: Date.now().toString(),
+        name: name,
+        email: email,
+        password: password, // In production, this should be hashed
+        createdAt: new Date().toISOString()
+    };
+    
+    users.push(newUser);
+    localStorage.setItem('myfans_users', JSON.stringify(users));
+    
+    return newUser;
 }
 
-// Login user via API
-async function loginUser(email, password) {
-    const response = await apiRequest('/auth/login', {
-        method: 'POST',
-        body: JSON.stringify({ email, password }),
-    });
+// Login user
+function loginUser(email, password) {
+    const users = getUsers();
+    const user = users.find(u => u.email === email && u.password === password);
     
-    if (response.token) {
-        saveAuthToken(response.token);
-        // Also store user info for compatibility
-        localStorage.setItem('myfans_current_user', JSON.stringify(response.user));
+    if (!user) {
+        throw new Error('Invalid email or password.');
     }
     
-    return response.user;
+    // Set current user
+    localStorage.setItem('myfans_current_user', JSON.stringify({
+        id: user.id,
+        name: user.name,
+        email: user.email
+    }));
+    
+    return user;
 }
 
-// Google login (simulated - same as before)
+// Google login (simulated)
 function googleLogin() {
     // In production, this would use Google OAuth
     // For demo purposes, we'll create a user with Google email
     const googleEmail = `user${Date.now()}@gmail.com`;
     const googleName = 'Google User';
     
-    // Register as a new user via API
-    return registerUser(googleName, googleEmail, null);
+    const users = getUsers();
+    let user = users.find(u => u.email === googleEmail);
+    
+    if (!user) {
+        // Create new user
+        user = {
+            id: Date.now().toString(),
+            name: googleName,
+            email: googleEmail,
+            password: null, // Google users don't need password
+            createdAt: new Date().toISOString()
+        };
+        users.push(user);
+        localStorage.setItem('myfans_users', JSON.stringify(users));
+    }
+    
+    // Set current user
+    localStorage.setItem('myfans_current_user', JSON.stringify({
+        id: user.id,
+        name: user.name,
+        email: user.email
+    }));
+    
+    return user;
+}
+
+// Get all users
+function getUsers() {
+    const stored = localStorage.getItem('myfans_users');
+    return stored ? JSON.parse(stored) : [];
 }
 
 // Show error message
@@ -157,7 +150,7 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Login form submission
     const loginFormElement = document.getElementById('loginFormElement');
-    loginFormElement.addEventListener('submit', async function(e) {
+    loginFormElement.addEventListener('submit', function(e) {
         e.preventDefault();
         hideMessages();
         
@@ -165,7 +158,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const password = document.getElementById('loginPassword').value;
         
         try {
-            await loginUser(email, password);
+            loginUser(email, password);
             showSuccess('Login successful! Redirecting...');
             setTimeout(() => {
                 window.location.href = 'index.html';
@@ -177,7 +170,7 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Register form submission
     const registerFormElement = document.getElementById('registerFormElement');
-    registerFormElement.addEventListener('submit', async function(e) {
+    registerFormElement.addEventListener('submit', function(e) {
         e.preventDefault();
         hideMessages();
         
@@ -197,7 +190,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         
         try {
-            await registerUser(name, email, password);
+            registerUser(name, email, password);
             showSuccess('Registration successful! Logging you in...');
             setTimeout(() => {
                 window.location.href = 'index.html';
@@ -211,10 +204,10 @@ document.addEventListener('DOMContentLoaded', function() {
     const googleLoginBtn = document.getElementById('googleLoginBtn');
     const googleRegisterBtn = document.getElementById('googleRegisterBtn');
     
-    googleLoginBtn.addEventListener('click', async function() {
+    googleLoginBtn.addEventListener('click', function() {
         hideMessages();
         try {
-            await googleLogin();
+            googleLogin();
             showSuccess('Google login successful! Redirecting...');
             setTimeout(() => {
                 window.location.href = 'index.html';
@@ -224,10 +217,10 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
     
-    googleRegisterBtn.addEventListener('click', async function() {
+    googleRegisterBtn.addEventListener('click', function() {
         hideMessages();
         try {
-            await googleLogin();
+            googleLogin();
             showSuccess('Google registration successful! Redirecting...');
             setTimeout(() => {
                 window.location.href = 'index.html';

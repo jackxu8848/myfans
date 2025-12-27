@@ -382,7 +382,7 @@ function handleModeToggle() {
     const modeToggle = document.getElementById('modeToggle');
     if (modeToggle.checked) {
         // Creator mode
-        window.location.href = 'myfans admin.html';
+        window.location.href = encodeURI('myfans admin.html');
     } else {
         // Viewer mode (already on myfans.html)
     }
