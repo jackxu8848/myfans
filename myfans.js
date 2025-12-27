@@ -1,47 +1,97 @@
 // Authentication Check
-function checkAuth() {
-    const currentUser = localStorage.getItem('myfans_current_user');
-    if (!currentUser) {
+async function checkAuth() {
+    const token = localStorage.getItem('myfans_auth_token');
+    if (!token) {
         window.location.href = 'login.html';
         return null;
     }
-    return JSON.parse(currentUser);
-}
-
-// Get stored videos from localStorage
-function getStoredVideos() {
-    const stored = localStorage.getItem('myfans_videos');
-    return stored ? JSON.parse(stored) : [];
-}
-
-// Get stored bundles from localStorage
-function getStoredBundles() {
-    const stored = localStorage.getItem('myfans_bundles');
-    return stored ? JSON.parse(stored) : [];
-}
-
-// Get membership price from localStorage
-function getMembershipPrice() {
-    const stored = localStorage.getItem('myfans_membership_price');
-    return stored ? parseFloat(stored) : null;
-}
-
-// Get user's purchased videos
-function getUserPurchasedVideos() {
-    const stored = localStorage.getItem(`myfans_user_${getCurrentUserId()}_purchased`);
-    return stored ? JSON.parse(stored) : [];
-}
-
-// Get user's membership status
-function getUserMembershipStatus() {
-    const stored = localStorage.getItem(`myfans_user_${getCurrentUserId()}_membership`);
-    if (!stored) return null;
-    const membership = JSON.parse(stored);
-    // Check if membership is still valid (not expired)
-    if (new Date(membership.expiresAt) > new Date()) {
-        return membership;
+    
+    try {
+        const user = await API.auth.getCurrentUser();
+        // Store user info for compatibility
+        localStorage.setItem('myfans_current_user', JSON.stringify(user));
+        return user;
+    } catch (error) {
+        console.error('Auth check failed:', error);
+        // Remove invalid token
+        localStorage.removeItem('myfans_auth_token');
+        window.location.href = 'login.html';
+        return null;
     }
-    return null;
+}
+
+// Get stored videos from API
+async function getStoredVideos() {
+    try {
+        return await API.videos.getAllVideos();
+    } catch (error) {
+        console.error('Error fetching videos:', error);
+        return [];
+    }
+}
+
+// Get stored bundles from API (by creator)
+async function getStoredBundles(creatorId) {
+    try {
+        return await API.bundles.getCreatorBundles(creatorId);
+    } catch (error) {
+        console.error('Error fetching bundles:', error);
+        return [];
+    }
+}
+
+// Get membership price from API (by creator)
+async function getMembershipPrice(creatorId) {
+    try {
+        const subscription = await API.subscriptions.getCreatorSubscription(creatorId);
+        return subscription ? parseFloat(subscription.monthly_price) : null;
+    } catch (error) {
+        console.error('Error fetching membership price:', error);
+        return null;
+    }
+}
+
+// Get user's purchased videos (video IDs)
+async function getUserPurchasedVideos() {
+    try {
+        const purchases = await API.purchases.getMyPurchases();
+        // Return array of video IDs
+        return purchases.map(p => p.video_id);
+    } catch (error) {
+        console.error('Error fetching purchases:', error);
+        return [];
+    }
+}
+
+// Get user's active subscriptions
+async function getUserMembershipStatus() {
+    try {
+        const subscriptions = await API.subscriptions.getMySubscriptions();
+        // Return active subscriptions
+        return subscriptions.filter(sub => 
+            sub.status === 'active' && 
+            new Date(sub.current_period_end) > new Date()
+        );
+    } catch (error) {
+        console.error('Error fetching subscriptions:', error);
+        return [];
+    }
+}
+
+// Check if user has access to a video (including free, purchased, or subscription)
+async function checkVideoAccess(videoId, videoPrice, creatorId) {
+    // Free videos are always accessible
+    if (videoPrice === 0) {
+        return { hasAccess: true, reason: 'free' };
+    }
+    
+    try {
+        const access = await API.purchases.checkAccess(videoId);
+        return access;
+    } catch (error) {
+        console.error('Error checking access:', error);
+        return { hasAccess: false, reason: 'error' };
+    }
 }
 
 // Get current user ID
@@ -56,44 +106,59 @@ let currentBundleConfig = null;
 let currentVideoForPayment = null;
 
 // Render videos list
-function renderVideosList() {
+async function renderVideosList() {
     const videosList = document.getElementById('videosList');
-    const videos = getStoredVideos();
-    const membership = getUserMembershipStatus();
-    const purchasedVideos = getUserPurchasedVideos();
     
-    if (videos.length === 0) {
-        videosList.innerHTML = '<p class="empty-message">No videos available. Check back soon!</p>';
-        return;
-    }
-    
-    videosList.innerHTML = videos.map(video => {
-        const videoUrl = video.url || `https://www.youtube.com/watch?v=${video.id}`;
-        const price = video.price !== undefined ? video.price : 0;
-        const priceDisplay = price === 0 ? 'FREE' : `$${price.toFixed(2)}`;
-        const priceClass = price === 0 ? 'price-free' : 'price-paid';
+    try {
+        const videos = await getStoredVideos();
         
-        // Check if user has access
-        const hasAccess = price === 0 || membership !== null || purchasedVideos.includes(video.id);
+        if (!videos || videos.length === 0) {
+            videosList.innerHTML = '<p class="empty-message">No videos available. Check back soon!</p>';
+            return;
+        }
         
-        return `
-        <div class="video-card ${!hasAccess ? 'locked' : ''}" 
-             data-video-id="${video.id}" 
-             data-video-price="${price}" 
-             data-video-url="${videoUrl}"
-             data-video-thumbnail="${video.thumbnail}"
-             data-video-title="${video.title.replace(/"/g, '&quot;')}">
-            <div class="video-card-link">
-                <img src="${video.thumbnail}" alt="${video.title}" class="video-card-thumbnail">
-                ${!hasAccess ? '<div class="locked-overlay"><span>🔒</span></div>' : ''}
+        // Check access for each video
+        const videosWithAccess = await Promise.all(
+            videos.map(async (video) => {
+                const videoId = video.id;
+                const price = parseFloat(video.price || 0);
+                const creatorId = video.creator_id;
+                
+                const access = await checkVideoAccess(videoId, price, creatorId);
+                
+                return {
+                    ...video,
+                    hasAccess: access.hasAccess,
+                    accessReason: access.reason
+                };
+            })
+        );
+        
+        videosList.innerHTML = videosWithAccess.map(video => {
+            const videoUrl = video.youtube_url || `https://www.youtube.com/watch?v=${video.youtube_video_id || video.id}`;
+            const price = parseFloat(video.price || 0);
+            const priceDisplay = price === 0 ? 'FREE' : `$${price.toFixed(2)}`;
+            const priceClass = price === 0 ? 'price-free' : 'price-paid';
+            const hasAccess = video.hasAccess;
+            
+            return `
+            <div class="video-card ${!hasAccess ? 'locked' : ''}" 
+                 data-video-id="${video.id}" 
+                 data-video-price="${price}" 
+                 data-video-url="${videoUrl}"
+                 data-video-thumbnail="${video.thumbnail || ''}"
+                 data-video-title="${(video.title || '').replace(/"/g, '&quot;')}">
+                <div class="video-card-link">
+                    <img src="${video.thumbnail || ''}" alt="${video.title || ''}" class="video-card-thumbnail">
+                    ${!hasAccess ? '<div class="locked-overlay"><span>🔒</span></div>' : ''}
+                </div>
+                <div class="video-card-info">
+                    <h3 class="video-card-title">${video.title || 'Untitled Video'}</h3>
+                    <div class="video-card-price ${priceClass}">${priceDisplay}</div>
+                </div>
             </div>
-            <div class="video-card-info">
-                <h3 class="video-card-title">${video.title}</h3>
-                <div class="video-card-price ${priceClass}">${priceDisplay}</div>
-            </div>
-        </div>
-    `;
-    }).join('');
+        `;
+        }).join('');
     
     // Add click handlers to video cards
     const videoCards = document.querySelectorAll('.video-card');
@@ -372,6 +437,8 @@ function completeMembershipPurchase() {
 // Logout
 function logout() {
     if (confirm('Are you sure you want to logout?')) {
+        // Remove token and user data
+        localStorage.removeItem('myfans_auth_token');
         localStorage.removeItem('myfans_current_user');
         window.location.href = 'login.html';
     }

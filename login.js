@@ -1,7 +1,8 @@
 // Updated login.js using API instead of localStorage
 // This version stores data in the database via the backend API
 
-const API_BASE_URL = 'http://localhost:3000/api';
+// Use API_BASE_URL from config.js or default to localhost for development
+const API_BASE_URL = window.API_BASE_URL || 'http://localhost:3000/api';
 
 // Helper function to get auth token
 function getAuthToken() {

@@ -1,7 +1,8 @@
 // MyFans API Service - Non-module version for use in HTML files
 // This version can be included directly with <script src="api-service.js"></script>
 
-const API_BASE_URL = 'http://localhost:3000/api';
+// Use API_BASE_URL from config.js or default to localhost for development
+const API_BASE_URL = window.API_BASE_URL || 'http://localhost:3000/api';
 
 // Helper function to get auth token
 function getAuthToken() {
@@ -135,6 +136,35 @@ const API = {
             return apiRequest(`/subscriptions/${id}`, {
                 method: 'PUT',
                 body: JSON.stringify(subscriptionData),
+            });
+        },
+        async subscribe(subscriptionId) {
+            return apiRequest(`/subscriptions/${subscriptionId}/subscribe`, {
+                method: 'POST',
+            });
+        },
+        async getMySubscriptions() {
+            return apiRequest('/subscriptions/my-subscriptions');
+        }
+    },
+
+    // Purchases
+    purchases: {
+        async checkAccess(videoId) {
+            return apiRequest(`/purchases/has-access/${videoId}`);
+        },
+        async getMyPurchases() {
+            return apiRequest('/purchases/my-purchases');
+        },
+        async purchaseVideo(videoId) {
+            return apiRequest(`/purchases/video/${videoId}`, {
+                method: 'POST',
+            });
+        },
+        async purchaseBundle(bundleId, selectedVideoIds) {
+            return apiRequest(`/purchases/bundle/${bundleId}`, {
+                method: 'POST',
+                body: JSON.stringify({ selectedVideoIds }),
             });
         }
     }
