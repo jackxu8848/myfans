@@ -1,8 +1,25 @@
 // Updated login.js using API instead of localStorage
 // This version stores data in the database via the backend API
 
-// Use API_BASE_URL from config.js or default to localhost for development
-const API_BASE_URL = window.API_BASE_URL || 'http://localhost:3000/api';
+// Get API_BASE_URL at runtime (from config.js or default)
+function getAPIBaseURL() {
+    // First check if explicitly set
+    if (window.API_BASE_URL) {
+        return window.API_BASE_URL;
+    }
+    
+    // Auto-detect based on current location
+    const hostname = window.location.hostname;
+    const protocol = window.location.protocol;
+    const port = window.location.port;
+    
+    if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '') {
+        return 'http://localhost:3000/api';
+    }
+    
+    // Production: assume backend on same domain by default
+    return `${protocol}//${hostname}${port ? ':' + port : ''}/api`;
+}
 
 // Helper function to get auth token
 function getAuthToken() {
@@ -34,7 +51,9 @@ async function apiRequest(endpoint, options = {}) {
     };
 
     try {
-        const response = await fetch(`${API_BASE_URL}${endpoint}`, config);
+        const apiUrl = getAPIBaseURL();
+        console.log('Making API request to:', `${apiUrl}${endpoint}`);
+        const response = await fetch(`${apiUrl}${endpoint}`, config);
         const data = await response.json();
 
         if (!response.ok) {
