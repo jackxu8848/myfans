@@ -25,6 +25,43 @@ function isValidYouTubeUrl(url) {
     return extractVideoId(url) !== null;
 }
 
+// Normalize YouTube URL to ensure it has proper protocol and domain
+function normalizeYouTubeUrl(url, videoId) {
+    if (!url || !videoId) {
+        // Fallback: construct URL from video ID
+        return `https://www.youtube.com/watch?v=${videoId}`;
+    }
+    
+    // If URL already starts with http:// or https://, check if it's a valid YouTube URL
+    if (url.match(/^https?:\/\//i)) {
+        // If it's already a proper YouTube URL, use it as-is
+        if (url.match(/^https?:\/\/(www\.)?youtube\.com/i) || url.match(/^https?:\/\/youtu\.be/i)) {
+            return url;
+        }
+        // If it has protocol but wrong domain, reconstruct from video ID
+        return `https://www.youtube.com/watch?v=${videoId}`;
+    }
+    
+    // If URL starts with youtube.com (without www), normalize to www.youtube.com
+    if (url.match(/^youtube\.com/i)) {
+        return `https://www.${url}`;
+    }
+    
+    // If URL starts with www.youtube.com, add https://
+    if (url.match(/^www\.youtube\.com/i)) {
+        return `https://${url}`;
+    }
+    
+    // If URL starts with youtu.be, convert to full format
+    if (url.match(/^youtu\.be\//i)) {
+        return `https://www.youtube.com/watch?v=${videoId}`;
+    }
+    
+    // For any other format (or malformed URL), construct clean URL from video ID
+    // This handles cases where URL is just "youtube.com/watch?v=..." without proper prefix
+    return `https://www.youtube.com/watch?v=${videoId}`;
+}
+
 // Get video info using YouTube oEmbed API (works for unlisted videos)
 async function getVideoInfoViaOEmbed(videoId, originalUrl) {
     try {
@@ -40,25 +77,53 @@ async function getVideoInfoViaOEmbed(videoId, originalUrl) {
         const response = await fetch(oembedUrl);
         
         if (!response.ok) {
-            if (response.status === 401 || response.status === 403) {
-                throw new Error('Video is private or restricted');
+            // Try to get error details from response
+            let errorMessage = 'Video is private, restricted, or not found';
+            try {
+                const errorText = await response.text();
+                // Sometimes YouTube returns HTML error pages
+                if (errorText.includes('404') || errorText.includes('Not Found')) {
+                    errorMessage = 'Video not found';
+                } else if (errorText.includes('403') || errorText.includes('Forbidden') || errorText.includes('private')) {
+                    errorMessage = 'Video is private or restricted';
+                }
+            } catch (e) {
+                // If we can't parse the error, use status-based messages
+                if (response.status === 401 || response.status === 403) {
+                    errorMessage = 'Video is private or restricted';
+                } else if (response.status === 404) {
+                    errorMessage = 'Video not found';
+                } else {
+                    errorMessage = `Failed to fetch video information (${response.status})`;
+                }
             }
-            if (response.status === 404) {
-                throw new Error('Video not found');
-            }
-            // For other errors, provide a generic message with status
-            throw new Error(`Failed to fetch video information (${response.status} ${response.statusText})`);
+            throw new Error(errorMessage);
         }
         
-        const data = await response.json();
+        // Parse the JSON response
+        let data;
+        try {
+            data = await response.json();
+        } catch (parseError) {
+            throw new Error('Invalid response from YouTube. The video may not be accessible.');
+        }
+        
+        // Validate that we got the required data
+        if (!data || !data.title || !data.thumbnail_url) {
+            throw new Error('Video information is incomplete. The video may not be accessible.');
+        }
+        
         return {
             title: data.title,
             thumbnail: data.thumbnail_url,
-            author: data.author_name,
+            author: data.author_name || 'Unknown',
             success: true
         };
     } catch (error) {
-        // Re-throw network errors or API errors
+        // Re-throw network errors or API errors with more context
+        if (error instanceof TypeError && error.message.includes('fetch')) {
+            throw new Error('Network error. Please check your connection and try again.');
+        }
         throw error;
     }
 }
@@ -125,57 +190,68 @@ function displayVideoPreview(videoInfo, videoId, videoUrl, price) {
     previewSection.style.display = 'block';
 }
 
-// Add video to list
-function addVideoToList(videoId, videoInfo, videoUrl, price) {
-    const videosList = document.getElementById('videosList');
-    const emptyMessage = videosList.querySelector('.empty-message');
-    
-    if (emptyMessage) {
-        emptyMessage.remove();
+// Add video to list via API
+async function addVideoToList(videoId, videoInfo, videoUrl, price) {
+    try {
+        const priceValue = parseFloat(price) || 0;
+        
+        // Create video via API
+        const response = await API.videos.createVideo({
+            youtubeVideoId: videoId,
+            youtubeUrl: videoUrl,
+            title: videoInfo.title,
+            thumbnailUrl: videoInfo.thumbnail_url || videoInfo.thumbnail,
+            price: priceValue
+        });
+        
+        // Reload videos list from API
+        await renderVideosList();
+        
+        // Hide preview
+        document.getElementById('videoPreview').style.display = 'none';
+        
+        showSuccess('Video added successfully!');
+    } catch (error) {
+        console.error('Error adding video:', error);
+        
+        // Check if error is about not being a creator
+        if (error.message.includes('Creator') || error.message.includes('403')) {
+            showError('You must be a creator to add videos. Please ensure you are in creator mode.');
+            // Try to become creator automatically
+            try {
+                await API.auth.becomeCreator();
+                showError('Switched to creator mode. Please try adding the video again.');
+            } catch (creatorError) {
+                showError('Failed to switch to creator mode: ' + creatorError.message);
+            }
+        } else {
+            showError('Failed to add video: ' + error.message);
+        }
+        throw error; // Re-throw to prevent form reset
     }
-    
-    // Get existing videos from localStorage
-    const videos = getStoredVideos();
-    
-    // Check if video already exists
-    if (videos.some(v => v.id === videoId)) {
-        showError('This video has already been added.');
-        return;
-    }
-    
-    // Add new video
-    const priceValue = parseFloat(price) || 0;
-    const newVideo = {
-        id: videoId,
-        title: videoInfo.title,
-        thumbnail: videoInfo.thumbnail,
-        url: videoUrl,
-        price: priceValue,
-        addedAt: new Date().toISOString()
-    };
-    
-    videos.push(newVideo);
-    saveVideosToStorage(videos);
-    renderVideosList();
-    
-    showSuccess('Video added successfully!');
 }
 
-// Get stored videos from localStorage
-function getStoredVideos() {
-    const stored = localStorage.getItem('myfans_videos');
-    return stored ? JSON.parse(stored) : [];
+// Get stored videos from API
+async function getStoredVideos() {
+    try {
+        const user = await API.auth.getCurrentUser();
+        return await API.videos.getVideosByCreator(user.id);
+    } catch (error) {
+        console.error('Error fetching videos:', error);
+        return [];
+    }
 }
 
-// Save videos to localStorage
+// Save videos to API (not used directly, videos are saved via createVideo API)
 function saveVideosToStorage(videos) {
-    localStorage.setItem('myfans_videos', JSON.stringify(videos));
+    // Videos are saved directly via API.createVideo, so this is a no-op
+    // Keeping for compatibility but it doesn't do anything
 }
 
 // Render videos list
-function renderVideosList() {
+async function renderVideosList() {
     const videosList = document.getElementById('videosList');
-    const videos = getStoredVideos();
+    const videos = await getStoredVideos();
     
     if (videos.length === 0) {
         videosList.innerHTML = '<p class="empty-message">No videos added yet. Add your first video above!</p>';
@@ -183,14 +259,21 @@ function renderVideosList() {
     }
     
     videosList.innerHTML = videos.map(video => {
-        const videoUrl = video.url || `https://www.youtube.com/watch?v=${video.id}`;
-        const price = video.price !== undefined ? video.price : 0;
+        const videoUrl = video.youtube_url || video.url || `https://www.youtube.com/watch?v=${video.youtube_video_id || video.id}`;
+        // Ensure price is a number (database might return it as string)
+        let price = 0;
+        if (video.price !== undefined && video.price !== null) {
+            price = typeof video.price === 'string' ? parseFloat(video.price) : Number(video.price);
+            if (isNaN(price)) price = 0;
+        }
         const priceDisplay = price === 0 ? 'FREE' : `$${price.toFixed(2)}`;
         const priceClass = price === 0 ? 'price-free' : 'price-paid';
+        const videoId = video.id; // Use database UUID
+        const thumbnail = video.thumbnail_url || video.thumbnail;
         return `
-        <div class="video-card" data-video-id="${video.id}">
+        <div class="video-card" data-video-id="${videoId}">
             <a href="${videoUrl}" target="_blank" rel="noopener noreferrer" class="video-card-link">
-                <img src="${video.thumbnail}" alt="${video.title}" class="video-card-thumbnail">
+                <img src="${thumbnail}" alt="${video.title}" class="video-card-thumbnail">
             </a>
             <div class="video-card-info">
                 <a href="${videoUrl}" target="_blank" rel="noopener noreferrer" class="video-card-title-link">
@@ -198,10 +281,10 @@ function renderVideosList() {
                 </a>
                 <div class="video-card-price ${priceClass}">${priceDisplay}</div>
                 <div class="video-card-meta">
-                    <span class="video-card-id">${video.id}</span>
+                    <span class="video-card-id">${video.youtube_video_id || videoId}</span>
                     <div class="video-card-actions">
-                        <button class="edit-btn" onclick="editVideoPrice('${video.id}')">Edit Price</button>
-                        <button class="delete-btn" onclick="deleteVideo('${video.id}')">Delete</button>
+                        <button class="edit-btn" onclick="editVideoPrice('${videoId}')">Edit Price</button>
+                        <button class="delete-btn" onclick="deleteVideo('${videoId}')">Delete</button>
                     </div>
                 </div>
             </div>
@@ -214,32 +297,46 @@ function renderVideosList() {
 }
 
 // Delete video
-function deleteVideo(videoId) {
+async function deleteVideo(videoId) {
     if (confirm('Are you sure you want to delete this video?')) {
-        const videos = getStoredVideos();
-        const filteredVideos = videos.filter(v => v.id !== videoId);
-        saveVideosToStorage(filteredVideos);
-        renderVideosList();
-        showSuccess('Video deleted successfully!');
-        setTimeout(hideMessages, 3000);
+        try {
+            await API.videos.deleteVideo(videoId);
+            await renderVideosList();
+            showSuccess('Video deleted successfully!');
+            setTimeout(hideMessages, 3000);
+        } catch (error) {
+            console.error('Error deleting video:', error);
+            showError('Failed to delete video: ' + error.message);
+        }
     }
 }
 
 // Authentication Check
-function checkAuth() {
-    const currentUser = localStorage.getItem('myfans_current_user');
-    if (!currentUser) {
+async function checkAuth() {
+    const token = localStorage.getItem('myfans_auth_token');
+    if (!token) {
         window.location.href = 'login.html';
         return null;
     }
-    return JSON.parse(currentUser);
+    
+    try {
+        const user = await API.auth.getCurrentUser();
+        // Store user info for compatibility
+        localStorage.setItem('myfans_current_user', JSON.stringify(user));
+        return user;
+    } catch (error) {
+        console.error('Auth check failed:', error);
+        // Remove invalid token
+        localStorage.removeItem('myfans_auth_token');
+        window.location.href = 'login.html';
+        return null;
+    }
 }
 
 // Logout
 function logout() {
     if (confirm('Are you sure you want to logout?')) {
-        localStorage.removeItem('myfans_current_user');
-        window.location.href = 'login.html';
+        API.auth.logout();
     }
 }
 
@@ -248,31 +345,36 @@ function handleModeToggle() {
     const modeToggle = document.getElementById('modeToggle');
     if (!modeToggle.checked) {
         // Viewer mode
-        window.location.href = 'myfans.html';
+        window.location.href = 'index.html';
     }
     // Creator mode (already on admin page)
 }
 
 // Edit video price
-function editVideoPrice(videoId) {
-    const videos = getStoredVideos();
-    const video = videos.find(v => v.id === videoId);
-    
-    if (!video) return;
-    
-    const newPrice = prompt(`Enter new price for "${video.title}"`, video.price || 0);
-    
-    if (newPrice !== null) {
-        const priceValue = parseFloat(newPrice);
-        if (!isNaN(priceValue) && priceValue >= 0) {
-            video.price = priceValue;
-            saveVideosToStorage(videos);
-            renderVideosList();
-            showSuccess('Video price updated successfully!');
-            setTimeout(hideMessages, 3000);
-        } else {
-            showError('Please enter a valid price (0 or greater).');
+async function editVideoPrice(videoId) {
+    try {
+        const video = await API.videos.getVideoById(videoId);
+        if (!video) {
+            showError('Video not found');
+            return;
         }
+        
+        const newPrice = prompt(`Enter new price for "${video.title}"`, video.price || 0);
+        
+        if (newPrice !== null) {
+            const priceValue = parseFloat(newPrice);
+            if (!isNaN(priceValue) && priceValue >= 0) {
+                await API.videos.updateVideo(videoId, { price: priceValue });
+                await renderVideosList();
+                showSuccess('Video price updated successfully!');
+                setTimeout(hideMessages, 3000);
+            } else {
+                showError('Please enter a valid price (0 or greater).');
+            }
+        }
+    } catch (error) {
+        console.error('Error updating video price:', error);
+        showError('Failed to update video price: ' + error.message);
     }
 }
 
@@ -281,10 +383,23 @@ window.deleteVideo = deleteVideo;
 window.editVideoPrice = editVideoPrice;
 
 // Handle form submission
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', async function() {
     // Check authentication
-    const user = checkAuth();
+    const user = await checkAuth();
     if (!user) return;
+    
+    // Check if user is a creator, if not, become one automatically
+    if (!user.isCreator && !user.is_creator) {
+        try {
+            await API.auth.becomeCreator();
+            // Refresh user info
+            const updatedUser = await API.auth.getCurrentUser();
+            localStorage.setItem('myfans_current_user', JSON.stringify(updatedUser));
+        } catch (error) {
+            console.error('Error becoming creator:', error);
+            showError('Failed to switch to creator mode: ' + error.message);
+        }
+    }
     
     // Logout button
     const logoutBtn = document.getElementById('logoutBtn');
@@ -305,7 +420,10 @@ document.addEventListener('DOMContentLoaded', function() {
     const btnLoader = addButton.querySelector('.btn-loader');
     
     // Render existing videos on load
-    renderVideosList();
+    renderVideosList().catch(err => {
+        console.error('Error loading videos:', err);
+        showError('Failed to load videos. Please refresh the page.');
+    });
     
     form.addEventListener('submit', async function(e) {
         e.preventDefault();
@@ -356,12 +474,15 @@ document.addEventListener('DOMContentLoaded', function() {
             // The original URL is preserved for storage
             const videoInfo = await getVideoInfoViaOEmbed(videoId, url);
             
+            // Normalize the URL to ensure it has proper protocol and domain
+            const normalizedUrl = normalizeYouTubeUrl(url, videoId);
+            
             // If we got here, the video is accessible
             // Display preview
-            displayVideoPreview(videoInfo, videoId, url, priceValue);
+            displayVideoPreview(videoInfo, videoId, normalizedUrl, priceValue);
             
-            // Add to list
-            addVideoToList(videoId, videoInfo, url, priceValue);
+            // Add to list (with normalized URL) - this now uses API
+            await addVideoToList(videoId, videoInfo, normalizedUrl, priceValue);
             
             // Reset form
             urlInput.value = '';
@@ -387,93 +508,140 @@ document.addEventListener('DOMContentLoaded', function() {
 
 // Pricing Settings Functions
 
-// Get stored bundles from localStorage
-function getStoredBundles() {
-    const stored = localStorage.getItem('myfans_bundles');
-    return stored ? JSON.parse(stored) : [];
+// Get stored bundles from API
+async function getStoredBundles() {
+    try {
+        const user = await API.auth.getCurrentUser();
+        return await API.bundles.getCreatorBundles(user.id);
+    } catch (error) {
+        console.error('Error fetching bundles:', error);
+        return [];
+    }
 }
 
-// Save bundles to localStorage
+// Save bundles to API (not used directly, bundles are saved via createBundle API)
 function saveBundlesToStorage(bundles) {
-    localStorage.setItem('myfans_bundles', JSON.stringify(bundles));
+    // Bundles are saved directly via API.createBundle, so this is a no-op
 }
 
-// Get stored membership price from localStorage
-function getMembershipPrice() {
-    const stored = localStorage.getItem('myfans_membership_price');
-    return stored ? parseFloat(stored) : null;
+// Get stored membership price from API
+async function getMembershipPrice() {
+    try {
+        const user = await API.auth.getCurrentUser();
+        const subscription = await API.subscriptions.getCreatorSubscription(user.id);
+        return subscription ? subscription.monthly_price : null;
+    } catch (error) {
+        console.error('Error fetching subscription:', error);
+        return null;
+    }
 }
 
-// Save membership price to localStorage
-function saveMembershipPrice(price) {
-    localStorage.setItem('myfans_membership_price', price.toString());
+// Save membership price to API (creates/updates subscription)
+async function saveMembershipPrice(price) {
+    try {
+        const user = await API.auth.getCurrentUser();
+        const existing = await API.subscriptions.getCreatorSubscription(user.id);
+        
+        if (existing) {
+            // Update existing subscription
+            await API.subscriptions.updateSubscription(existing.id, { monthlyPrice: price });
+        } else {
+            // Create new subscription
+            await API.subscriptions.createSubscription(price);
+        }
+    } catch (error) {
+        console.error('Error saving subscription:', error);
+        throw error;
+    }
 }
 
 // Render bundles list
-function renderBundlesList() {
+async function renderBundlesList() {
     const bundlesList = document.getElementById('bundlesList');
-    const bundles = getStoredBundles();
+    const bundles = await getStoredBundles();
     
     if (bundles.length === 0) {
         bundlesList.innerHTML = '<p class="empty-bundles">No bundles configured yet.</p>';
         return;
     }
     
-    bundlesList.innerHTML = bundles.map((bundle, index) => `
+    bundlesList.innerHTML = bundles.map((bundle) => {
+        let bundlePrice = 0;
+        if (bundle.price !== undefined && bundle.price !== null) {
+            bundlePrice = typeof bundle.price === 'string' ? parseFloat(bundle.price) : Number(bundle.price);
+            if (isNaN(bundlePrice)) bundlePrice = 0;
+        }
+        return `
         <div class="bundle-item">
             <div class="bundle-info">
                 <span class="bundle-badge">Bundle</span>
-                <span class="bundle-details">Select any <strong>${bundle.count}</strong> videos for <strong>$${bundle.price.toFixed(2)}</strong></span>
+                <span class="bundle-details">Select any <strong>${bundle.video_count}</strong> videos for <strong>$${bundlePrice.toFixed(2)}</strong></span>
             </div>
             <div class="bundle-actions">
-                <button class="edit-bundle-btn" onclick="editBundle(${index})">Edit</button>
-                <button class="delete-bundle-btn" onclick="deleteBundle(${index})">Delete</button>
+                <button class="edit-bundle-btn" onclick="editBundle('${bundle.id}')">Edit</button>
+                <button class="delete-bundle-btn" onclick="deleteBundle('${bundle.id}')">Delete</button>
             </div>
         </div>
-    `).join('');
+    `;
+    }).join('');
 }
 
 // Edit bundle
-function editBundle(index) {
-    const bundles = getStoredBundles();
-    const bundle = bundles[index];
-    
-    const newCount = prompt(`Enter number of videos for bundle:`, bundle.count);
-    if (newCount === null) return;
-    
-    const newPrice = prompt(`Enter bundle price:`, bundle.price);
-    if (newPrice === null) return;
-    
-    const countValue = parseInt(newCount);
-    const priceValue = parseFloat(newPrice);
-    
-    if (isNaN(countValue) || countValue < 2) {
-        showError('Bundle must include at least 2 videos.');
-        return;
+async function editBundle(bundleId) {
+    try {
+        const bundles = await getStoredBundles();
+        const bundle = bundles.find(b => b.id === bundleId);
+        
+        if (!bundle) {
+            showError('Bundle not found');
+            return;
+        }
+        
+        const newCount = prompt(`Enter number of videos for bundle:`, bundle.video_count);
+        if (newCount === null) return;
+        
+        const newPrice = prompt(`Enter bundle price:`, bundle.price);
+        if (newPrice === null) return;
+        
+        const countValue = parseInt(newCount);
+        const priceValue = parseFloat(newPrice);
+        
+        if (isNaN(countValue) || countValue < 2) {
+            showError('Bundle must include at least 2 videos.');
+            return;
+        }
+        
+        if (isNaN(priceValue) || priceValue <= 0) {
+            showError('Bundle price must be greater than 0.');
+            return;
+        }
+        
+        await API.bundles.updateBundle(bundleId, {
+            videoCount: countValue,
+            price: priceValue
+        });
+        
+        await renderBundlesList();
+        showSuccess('Bundle updated successfully!');
+        setTimeout(hideMessages, 3000);
+    } catch (error) {
+        console.error('Error updating bundle:', error);
+        showError('Failed to update bundle: ' + error.message);
     }
-    
-    if (isNaN(priceValue) || priceValue <= 0) {
-        showError('Bundle price must be greater than 0.');
-        return;
-    }
-    
-    bundle.count = countValue;
-    bundle.price = priceValue;
-    saveBundlesToStorage(bundles);
-    renderBundlesList();
-    showSuccess('Bundle updated successfully!');
-    setTimeout(hideMessages, 3000);
 }
 
 // Delete bundle
-function deleteBundle(index) {
+async function deleteBundle(bundleId) {
     if (confirm('Are you sure you want to delete this bundle?')) {
-        const bundles = getStoredBundles();
-        bundles.splice(index, 1);
-        saveBundlesToStorage(bundles);
-        renderBundlesList();
-        showSuccess('Bundle deleted successfully!');
-        setTimeout(hideMessages, 3000);
+        try {
+            await API.bundles.deleteBundle(bundleId);
+            await renderBundlesList();
+            showSuccess('Bundle deleted successfully!');
+            setTimeout(hideMessages, 3000);
+        } catch (error) {
+            console.error('Error deleting bundle:', error);
+            showError('Failed to delete bundle: ' + error.message);
+        }
     }
 }
 
@@ -482,58 +650,84 @@ window.deleteBundle = deleteBundle;
 window.editBundle = editBundle;
 
 // Render membership display
-function renderMembershipDisplay() {
+async function renderMembershipDisplay() {
     const membershipDisplay = document.getElementById('membershipDisplay');
-    const price = getMembershipPrice();
+    const price = await getMembershipPrice();
     
     if (price === null) {
         membershipDisplay.innerHTML = '<p class="empty-membership">No membership price set yet.</p>';
         return;
     }
     
+    const user = await API.auth.getCurrentUser();
+    const subscription = await API.subscriptions.getCreatorSubscription(user.id);
+    const subscriptionId = subscription ? subscription.id : null;
+    
+    // Ensure price is a number
+    let membershipPrice = 0;
+    if (price !== undefined && price !== null) {
+        membershipPrice = typeof price === 'string' ? parseFloat(price) : Number(price);
+        if (isNaN(membershipPrice)) membershipPrice = 0;
+    }
+    
     membershipDisplay.innerHTML = `
         <div class="membership-item">
             <div class="membership-info">
                 <span class="membership-badge">Membership</span>
-                <span class="membership-details">Unlimited access to all videos for <strong>$${price.toFixed(2)}</strong> per month</span>
+                <span class="membership-details">Unlimited access to all videos for <strong>$${membershipPrice.toFixed(2)}</strong> per month</span>
             </div>
             <div class="membership-actions">
                 <button class="edit-membership-btn" onclick="editMembership()">Edit</button>
-                <button class="delete-membership-btn" onclick="deleteMembership()">Remove</button>
+                <button class="delete-membership-btn" onclick="deleteMembership('${subscriptionId}')">Remove</button>
             </div>
         </div>
     `;
 }
 
 // Edit membership
-function editMembership() {
-    const currentPrice = getMembershipPrice();
-    if (currentPrice === null) return;
-    
-    const newPrice = prompt(`Enter new monthly membership price:`, currentPrice);
-    if (newPrice === null) return;
-    
-    const priceValue = parseFloat(newPrice);
-    
-    if (isNaN(priceValue) || priceValue <= 0) {
-        showError('Membership price must be greater than 0.');
-        return;
+async function editMembership() {
+    try {
+        const currentPrice = await getMembershipPrice();
+        if (currentPrice === null) return;
+        
+        const newPrice = prompt(`Enter new monthly membership price:`, currentPrice);
+        if (newPrice === null) return;
+        
+        const priceValue = parseFloat(newPrice);
+        
+        if (isNaN(priceValue) || priceValue <= 0) {
+            showError('Membership price must be greater than 0.');
+            return;
+        }
+        
+        await saveMembershipPrice(priceValue);
+        await renderMembershipDisplay();
+        document.getElementById('membershipPrice').value = priceValue.toFixed(2);
+        showSuccess('Membership price updated successfully!');
+        setTimeout(hideMessages, 3000);
+    } catch (error) {
+        console.error('Error updating membership:', error);
+        showError('Failed to update membership: ' + error.message);
     }
-    
-    saveMembershipPrice(priceValue);
-    renderMembershipDisplay();
-    document.getElementById('membershipPrice').value = priceValue.toFixed(2);
-    showSuccess('Membership price updated successfully!');
-    setTimeout(hideMessages, 3000);
 }
 
 // Delete membership
-function deleteMembership() {
+async function deleteMembership(subscriptionId) {
+    if (!subscriptionId) {
+        showError('No subscription found to delete');
+        return;
+    }
+    
     if (confirm('Are you sure you want to remove the membership pricing?')) {
-        localStorage.removeItem('myfans_membership_price');
-        renderMembershipDisplay();
-        showSuccess('Membership pricing removed successfully!');
-        setTimeout(hideMessages, 3000);
+        try {
+            await API.subscriptions.updateSubscription(subscriptionId, { isActive: false });
+            await renderMembershipDisplay();
+            showSuccess('Membership pricing removed successfully!');
+            setTimeout(hideMessages, 3000);
+        } catch (error) {
+            console.error('Error deleting membership:', error);
+            showError('Failed to remove membership: ' + error.message);
+        }
     }
 }
 
@@ -542,20 +736,20 @@ window.deleteMembership = deleteMembership;
 window.editMembership = editMembership;
 
 // Initialize pricing settings
-function initializePricingSettings() {
+async function initializePricingSettings() {
     // Render existing bundles and membership
-    renderBundlesList();
-    renderMembershipDisplay();
+    await renderBundlesList();
+    await renderMembershipDisplay();
     
     // Load existing membership price into form if exists
-    const membershipPrice = getMembershipPrice();
+    const membershipPrice = await getMembershipPrice();
     if (membershipPrice !== null) {
         document.getElementById('membershipPrice').value = membershipPrice.toFixed(2);
     }
     
     // Handle bundle form submission
     const bundleForm = document.getElementById('bundleForm');
-    bundleForm.addEventListener('submit', function(e) {
+    bundleForm.addEventListener('submit', async function(e) {
         e.preventDefault();
         
         const count = parseInt(document.getElementById('bundleCount').value);
@@ -571,21 +765,25 @@ function initializePricingSettings() {
             return;
         }
         
-        const bundles = getStoredBundles();
-        bundles.push({ count, price });
-        saveBundlesToStorage(bundles);
-        renderBundlesList();
-        
-        // Reset form
-        bundleForm.reset();
-        
-        showSuccess('Bundle added successfully!');
-        setTimeout(hideMessages, 3000);
+        try {
+            await API.bundles.createBundle({
+                videoCount: count,
+                price: price
+            });
+            
+            await renderBundlesList();
+            bundleForm.reset();
+            showSuccess('Bundle added successfully!');
+            setTimeout(hideMessages, 3000);
+        } catch (error) {
+            console.error('Error creating bundle:', error);
+            showError('Failed to create bundle: ' + error.message);
+        }
     });
     
     // Handle membership form submission
     const membershipForm = document.getElementById('membershipForm');
-    membershipForm.addEventListener('submit', function(e) {
+    membershipForm.addEventListener('submit', async function(e) {
         e.preventDefault();
         
         const price = parseFloat(document.getElementById('membershipPrice').value);
@@ -595,11 +793,15 @@ function initializePricingSettings() {
             return;
         }
         
-        saveMembershipPrice(price);
-        renderMembershipDisplay();
-        
-        showSuccess('Membership price saved successfully!');
-        setTimeout(hideMessages, 3000);
+        try {
+            await saveMembershipPrice(price);
+            await renderMembershipDisplay();
+            showSuccess('Membership price saved successfully!');
+            setTimeout(hideMessages, 3000);
+        } catch (error) {
+            console.error('Error saving membership:', error);
+            showError('Failed to save membership: ' + error.message);
+        }
     });
 }
 
