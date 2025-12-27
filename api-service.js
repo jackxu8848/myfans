@@ -1,8 +1,25 @@
 // MyFans API Service - Non-module version for use in HTML files
 // This version can be included directly with <script src="api-service.js"></script>
 
-// Use API_BASE_URL from config.js or default to localhost for development
-const API_BASE_URL = window.API_BASE_URL || 'http://localhost:3000/api';
+// Get API_BASE_URL at runtime (from config.js or default)
+function getAPIBaseURL() {
+    // First check if explicitly set
+    if (window.API_BASE_URL) {
+        return window.API_BASE_URL;
+    }
+    
+    // Auto-detect based on current location
+    const hostname = window.location.hostname;
+    const protocol = window.location.protocol;
+    const port = window.location.port;
+    
+    if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '') {
+        return 'http://localhost:3000/api';
+    }
+    
+    // Production: assume backend on same domain by default
+    return `${protocol}//${hostname}${port ? ':' + port : ''}/api`;
+}
 
 // Helper function to get auth token
 function getAuthToken() {
@@ -34,7 +51,8 @@ async function apiRequest(endpoint, options = {}) {
     };
 
     try {
-        const response = await fetch(`${API_BASE_URL}${endpoint}`, config);
+        const apiUrl = getAPIBaseURL();
+        const response = await fetch(`${apiUrl}${endpoint}`, config);
         const data = await response.json();
 
         if (!response.ok) {
